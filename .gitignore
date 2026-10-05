@@ -1,0 +1,31 @@
+# Ambiente virtual Python
+.venv/
+venv/
+
+# Cache do Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Resultados de treinamento do YOLO
+runs/
+
+# Dataset utilizado para treinamento
+SIMR_DATASET/
+trashnet-master/
+
+# Arquivos temporários
+*.tmp
+*.log
+
+# VS Code
+.vscode/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+# Dataset real do SIMR
+dataset_simr_real/
+
+# Modelo base do YOLO
+yolov8n.pt

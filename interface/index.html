@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>SIMR - Identificação de Materiais Recicláveis</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Arial, Helvetica, sans-serif;
+            background: #f3f5f7;
+            color: #1f2937;
+        }
+
+        header {
+            background: #16324f;
+            color: white;
+            padding: 25px;
+            text-align: center;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 32px;
+        }
+
+        header p {
+            margin-top: 8px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 30px auto;
+            padding: 20px;
+        }
+
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.10);
+            margin-bottom: 25px;
+        }
+
+        h2 {
+            margin-top: 0;
+            color: #16324f;
+        }
+
+        .upload-area {
+            border: 2px dashed #9ca3af;
+            border-radius: 10px;
+            padding: 30px;
+            text-align: center;
+        }
+
+        input[type="file"] {
+            margin: 15px 0;
+        }
+
+        #preview {
+            display: none;
+            max-width: 100%;
+            max-height: 350px;
+            margin: 20px auto;
+            border-radius: 10px;
+        }
+
+        button {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            background: #16324f;
+            color: white;
+            font-size: 17px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        button:hover {
+            background: #244e73;
+        }
+
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .resultado {
+            display: none;
+        }
+
+        .resultado-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .item {
+            background: #f3f5f7;
+            padding: 18px;
+            border-radius: 8px;
+        }
+
+        .item span {
+            display: block;
+            font-size: 13px;
+            color: #6b7280;
+            margin-bottom: 6px;
+        }
+
+        .item strong {
+            font-size: 20px;
+        }
+
+        .status {
+            color: green;
+        }
+
+        #erro {
+            display: none;
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+
+        footer {
+            text-align: center;
+            padding: 25px;
+            color: #6b7280;
+        }
+
+        @media (max-width: 600px) {
+            .resultado-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+
+<body>
+
+<header>
+
+    <h1>SIMR</h1>
+
+    <p>
+        Sistema de Identificação de Materiais Recicláveis
+    </p>
+
+</header>
+
+
+<div class="container">
+
+    <!-- SELEÇÃO DA IMAGEM -->
+
+    <div class="card">
+
+        <h2>Análise de Material</h2>
+
+        <p>
+            Selecione uma imagem para realizar a identificação
+            utilizando o modelo YOLOv8.
+        </p>
+
+        <div class="upload-area">
+
+            <strong>Selecione uma imagem</strong>
+
+            <br>
+
+            <input
+                type="file"
+                id="arquivo"
+                accept="image/*"
+            >
+
+            <br>
+
+            <img
+                id="preview"
+                alt="Pré-visualização"
+            >
+
+        </div>
+
+        <button
+            id="botaoAnalisar"
+            onclick="analisarImagem()"
+        >
+            ANALISAR MATERIAL
+        </button>
+
+        <div id="erro"></div>
+
+    </div>
+
+
+    <!-- RESULTADO -->
+
+    <div
+        class="card resultado"
+        id="resultado"
+    >
+
+        <h2>Resultado da Identificação</h2>
+
+        <div class="resultado-grid">
+
+            <div class="item">
+
+                <span>Material identificado</span>
+
+                <strong id="material">
+                    -
+                </strong>
+
+            </div>
+
+
+            <div class="item">
+
+                <span>Confiança da IA</span>
+
+                <strong id="confianca">
+                    -
+                </strong>
+
+            </div>
+
+
+            <div class="item">
+
+                <span>Modelo</span>
+
+                <strong>
+                    YOLOv8
+                </strong>
+
+            </div>
+
+
+            <div class="item">
+
+                <span>Status</span>
+
+                <strong
+                    class="status"
+                    id="status"
+                >
+                    -
+                </strong>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<footer>
+
+    SIMR - Sistema de Identificação de Materiais Recicláveis
+
+</footer>
+
+
+<script>
+
+    const arquivoInput =
+        document.getElementById("arquivo");
+
+    const preview =
+        document.getElementById("preview");
+
+
+    // -----------------------------------------
+    // PRE-VISUALIZACAO
+    // -----------------------------------------
+
+    arquivoInput.addEventListener(
+        "change",
+        function () {
+
+            const arquivo =
+                arquivoInput.files[0];
+
+            if (!arquivo) {
+
+                preview.style.display =
+                    "none";
+
+                return;
+            }
+
+            preview.src =
+                URL.createObjectURL(arquivo);
+
+            preview.style.display =
+                "block";
+
+        }
+    );
+
+
+    // -----------------------------------------
+    // ANALISAR IMAGEM
+    // -----------------------------------------
+
+    async function analisarImagem() {
+
+        const arquivo =
+            arquivoInput.files[0];
+
+        const erro =
+            document.getElementById("erro");
+
+        const resultado =
+            document.getElementById("resultado");
+
+        const botao =
+            document.getElementById(
+                "botaoAnalisar"
+            );
+
+
+        erro.style.display =
+            "none";
+
+
+        if (!arquivo) {
+
+            erro.innerText =
+                "Selecione uma imagem primeiro.";
+
+            erro.style.display =
+                "block";
+
+            return;
+        }
+
+
+        const dados =
+            new FormData();
+
+        dados.append(
+            "arquivo",
+            arquivo
+        );
+
+
+        try {
+
+            botao.disabled =
+                true;
+
+            botao.innerText =
+                "ANALISANDO...";
+
+
+            const resposta =
+                await fetch(
+                    "/detectar",
+                    {
+                        method: "POST",
+                        body: dados
+                    }
+                );
+
+
+            if (!resposta.ok) {
+
+                throw new Error(
+                    "Erro na comunicação com a API."
+                );
+
+            }
+
+
+            const dadosResposta =
+                await resposta.json();
+
+
+            if (dadosResposta.sucesso) {
+
+                document.getElementById(
+                    "material"
+                ).innerText =
+                    dadosResposta.material.toUpperCase();
+
+
+                document.getElementById(
+                    "confianca"
+                ).innerText =
+                    dadosResposta.confianca + " %";
+
+
+                document.getElementById(
+                    "status"
+                ).innerText =
+                    "DETECTADO";
+
+
+                resultado.style.display =
+                    "block";
+
+            }
+
+            else {
+
+                erro.innerText =
+                    "Nenhum material foi detectado.";
+
+                erro.style.display =
+                    "block";
+
+                resultado.style.display =
+                    "none";
+
+            }
+
+        }
+
+        catch (e) {
+
+            erro.innerText =
+                "Não foi possível conectar à API do SIMR.";
+
+            erro.style.display =
+                "block";
+
+        }
+
+        finally {
+
+            botao.disabled =
+                false;
+
+            botao.innerText =
+                "ANALISAR MATERIAL";
+
+        }
+
+    }
+
+</script>
+
+
+</body>
+
+</html>

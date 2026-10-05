@@ -1,0 +1,658 @@
+from pathlib import Path
+
+code = r'''"""
+SIMR - Interface de Aquisição e Fusão de Sensores + YOLOv8
+UNIFEI - Projeto de Instrumentação
+
+Instalação:
+    pip install ultralytics opencv-python pyserial pillow numpy
+
+Execução:
+    python simr_interface.py
+
+O programa funciona em dois modos:
+1) DEMONSTRAÇÃO: gera dados de sensores simulados e usa a câmera local.
+2) ESP32: recebe uma linha JSON pela porta serial.
+
+Formato esperado do ESP32:
+{"capacitivo":1,"indutivo":0,"nir":{"PET":0.85,"PEAD":0.08,"PP":0.04,"PVC":0.03}}
+
+Exemplo:
+{"capacitivo":1,"indutivo":1,"nir":{"PET":0.02,"PEAD":0.01,"PP":0.01,"PVC":0.01}}
+
+Para usar o modelo treinado do projeto, coloque o arquivo:
+    best.pt
+na mesma pasta deste programa e altere MODEL_PATH abaixo.
+
+O YOLOv8 pode ser usado com:
+    yolov8n.pt  -> modelo pré-treinado para testes
+    best.pt     -> modelo treinado com as classes do SIMR
+"""
+
+import json
+import queue
+import random
+import threading
+import time
+from pathlib import Path
+
+import tkinter as tk
+from tkinter import ttk, messagebox
+
+try:
+    import cv2
+    from PIL import Image, ImageTk
+except ImportError:
+    cv2 = None
+    Image = ImageTk = None
+
+try:
+    import serial
+    import serial.tools.list_ports
+except ImportError:
+    serial = None
+
+try:
+    from ultralytics import YOLO
+except ImportError:
+    YOLO = None
+
+
+# =========================
+# CONFIGURAÇÕES DO SIMR
+# =========================
+
+MODEL_PATH = "best.pt"          # Troque para yolov8n.pt para teste inicial
+CAMERA_INDEX = 0
+SERIAL_BAUD = 115200
+CONF_THRESHOLD = 0.35
+
+# Classes previstas no projeto
+SIMR_CLASSES = ["Metal", "PET", "PEAD", "PP", "Vidro", "Rejeito", "Desconhecido"]
+
+
+class SIMRInterface:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("SIMR - Sistema de Identificação de Materiais Recicláveis")
+        self.root.geometry("1280x780")
+        self.root.minsize(1050, 680)
+
+        self.running = False
+        self.demo_mode = True
+        self.camera = None
+        self.serial_conn = None
+        self.model = None
+        self.frame_queue = queue.Queue(maxsize=1)
+        self.sensor_queue = queue.Queue(maxsize=5)
+
+        self.capacitivo = 0
+        self.indutivo = 0
+        self.nir = {"PET": 0.0, "PEAD": 0.0, "PP": 0.0, "PVC": 0.0}
+        self.yolo_class = "Aguardando"
+        self.yolo_conf = 0.0
+        self.final_class = "Aguardando"
+        self.final_conf = 0.0
+        self.detections = []
+
+        self.status_var = tk.StringVar(value="Sistema parado")
+        self.mode_var = tk.StringVar(value="Modo demonstração")
+        self.port_var = tk.StringVar(value="")
+        self.model_var = tk.StringVar(value=MODEL_PATH)
+
+        self._build_style()
+        self._build_ui()
+        self._load_model()
+
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
+
+    # -------------------------
+    # Interface
+    # -------------------------
+
+    def _build_style(self):
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        style.configure("Title.TLabel", font=("Segoe UI", 22, "bold"))
+        style.configure("Section.TLabel", font=("Segoe UI", 12, "bold"))
+        style.configure("Big.TLabel", font=("Segoe UI", 20, "bold"))
+        style.configure("Value.TLabel", font=("Segoe UI", 13, "bold"))
+        style.configure("Small.TLabel", font=("Segoe UI", 9))
+
+    def _build_ui(self):
+        main = ttk.Frame(self.root, padding=12)
+        main.pack(fill="both", expand=True)
+
+        header = ttk.Frame(main)
+        header.pack(fill="x", pady=(0, 10))
+
+        ttk.Label(
+            header,
+            text="SIMR — Sistema de Identificação de Materiais Recicláveis",
+            style="Title.TLabel"
+        ).pack(side="left")
+
+        ttk.Label(header, textvariable=self.status_var).pack(side="right")
+
+        body = ttk.Frame(main)
+        body.pack(fill="both", expand=True)
+
+        # Coluna esquerda: câmera
+        left = ttk.LabelFrame(body, text="Visão Computacional — YOLOv8", padding=8)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 8))
+
+        self.video_label = ttk.Label(
+            left,
+            text="Câmera desligada",
+            anchor="center",
+            relief="sunken"
+        )
+        self.video_label.pack(fill="both", expand=True)
+
+        cam_buttons = ttk.Frame(left)
+        cam_buttons.pack(fill="x", pady=(8, 0))
+
+        ttk.Button(cam_buttons, text="Iniciar sistema", command=self.start).pack(
+            side="left", padx=(0, 5)
+        )
+        ttk.Button(cam_buttons, text="Parar", command=self.stop).pack(
+            side="left", padx=5
+        )
+        ttk.Button(cam_buttons, text="Capturar", command=self.capture).pack(
+            side="left", padx=5
+        )
+
+        # Coluna direita
+        right = ttk.Frame(body, width=410)
+        right.pack(side="right", fill="y")
+        right.pack_propagate(False)
+
+        # Sensores
+        sensor_box = ttk.LabelFrame(right, text="Dados dos sensores — ESP32", padding=10)
+        sensor_box.pack(fill="x", pady=(0, 8))
+
+        self.sensor_labels = {}
+
+        self._sensor_row(sensor_box, "Sensor Capacitivo", "capacitivo")
+        self._sensor_row(sensor_box, "Sensor Indutivo", "indutivo")
+
+        ttk.Label(sensor_box, text="NIR — resposta relativa",
+                  style="Section.TLabel").pack(anchor="w", pady=(10, 4))
+
+        for name in ["PET", "PEAD", "PP", "PVC"]:
+            row = ttk.Frame(sensor_box)
+            row.pack(fill="x", pady=2)
+            ttk.Label(row, text=name, width=8).pack(side="left")
+            var = tk.StringVar(value="0.00")
+            self.sensor_labels[name] = var
+            ttk.Label(row, textvariable=var, style="Value.TLabel").pack(side="right")
+
+        # YOLO
+        yolo_box = ttk.LabelFrame(right, text="Resultado do YOLOv8", padding=10)
+        yolo_box.pack(fill="x", pady=(0, 8))
+
+        self.yolo_class_var = tk.StringVar(value="Aguardando")
+        self.yolo_conf_var = tk.StringVar(value="0.00")
+
+        ttk.Label(yolo_box, text="Classe detectada").pack(anchor="w")
+        ttk.Label(yolo_box, textvariable=self.yolo_class_var,
+                  style="Big.TLabel").pack(anchor="w")
+
+        ttk.Label(yolo_box, text="Confiança").pack(anchor="w", pady=(8, 0))
+        ttk.Label(yolo_box, textvariable=self.yolo_conf_var,
+                  style="Value.TLabel").pack(anchor="w")
+
+        # Fusão
+        fusion_box = ttk.LabelFrame(right, text="Fusão dos dados", padding=10)
+        fusion_box.pack(fill="x", pady=(0, 8))
+
+        self.final_class_var = tk.StringVar(value="Aguardando")
+        self.final_conf_var = tk.StringVar(value="0.00")
+
+        ttk.Label(fusion_box, text="CLASSIFICAÇÃO FINAL",
+                  style="Section.TLabel").pack(anchor="center")
+        ttk.Label(fusion_box, textvariable=self.final_class_var,
+                  font=("Segoe UI", 24, "bold"),
+                  anchor="center").pack(fill="x", pady=4)
+        ttk.Label(fusion_box, text="Confiança da decisão").pack(anchor="center")
+        ttk.Label(fusion_box, textvariable=self.final_conf_var,
+                  style="Value.TLabel",
+                  anchor="center").pack(fill="x")
+
+        # Comunicação
+        comm_box = ttk.LabelFrame(right, text="Comunicação", padding=10)
+        comm_box.pack(fill="x", pady=(0, 8))
+
+        ttk.Label(comm_box, text="Porta serial:").grid(row=0, column=0, sticky="w")
+        self.port_combo = ttk.Combobox(comm_box, textvariable=self.port_var, width=14)
+        self.port_combo.grid(row=0, column=1, padx=5)
+        ttk.Button(comm_box, text="Atualizar",
+                   command=self.update_ports).grid(row=0, column=2)
+
+        ttk.Button(comm_box, text="Conectar ESP32",
+                   command=self.connect_serial).grid(row=1, column=0, columnspan=3,
+                                                     sticky="ew", pady=(8, 0))
+
+        ttk.Label(comm_box, textvariable=self.mode_var,
+                  style="Small.TLabel").grid(row=2, column=0, columnspan=3,
+                                             sticky="w", pady=(5, 0))
+
+        self.update_ports()
+
+        # Rodapé
+        footer = ttk.Frame(main)
+        footer.pack(fill="x", pady=(8, 0))
+
+        ttk.Label(
+            footer,
+            text="Fluxo: Câmera + YOLOv8 + Capacitivo + Indutivo + NIR → ESP32/PC → Fusão → Classificação"
+        ).pack(side="left")
+
+        ttk.Label(
+            footer,
+            text="SIMR"
+        ).pack(side="right")
+
+    def _sensor_row(self, parent, text, key):
+        row = ttk.Frame(parent)
+        row.pack(fill="x", pady=3)
+
+        ttk.Label(row, text=text).pack(side="left")
+        var = tk.StringVar(value="0")
+        self.sensor_labels[key] = var
+        ttk.Label(row, textvariable=var, style="Value.TLabel").pack(side="right")
+
+    # -------------------------
+    # YOLO
+    # -------------------------
+
+    def _load_model(self):
+        if YOLO is None:
+            self.mode_var.set("Ultralytics não instalado — execute: pip install ultralytics")
+            return
+
+        path = Path(MODEL_PATH)
+
+        if not path.exists():
+            # Modelo de teste oficial. Para o projeto, substituir por best.pt treinado.
+            try:
+                self.model = YOLO("yolov8n.pt")
+                self.model_var.set("yolov8n.pt (teste)")
+                self.mode_var.set(
+                    "Modelo de teste carregado. Para o SIMR, use o best.pt treinado."
+                )
+            except Exception as exc:
+                self.mode_var.set(f"Erro ao carregar YOLO: {exc}")
+        else:
+            try:
+                self.model = YOLO(str(path))
+                self.model_var.set(str(path))
+                self.mode_var.set(f"Modelo SIMR carregado: {path.name}")
+            except Exception as exc:
+                self.mode_var.set(f"Erro ao carregar modelo: {exc}")
+
+    def _run_yolo(self, frame):
+        if self.model is None:
+            return frame
+
+        try:
+            results = self.model.predict(
+                source=frame,
+                conf=CONF_THRESHOLD,
+                verbose=False
+            )
+
+            if not results:
+                return frame
+
+            result = results[0]
+            self.detections = []
+
+            if result.boxes is not None:
+                for box in result.boxes:
+                    cls_id = int(box.cls.item())
+                    conf = float(box.conf.item())
+                    name = result.names.get(cls_id, str(cls_id))
+
+                    self.detections.append((name, conf))
+
+            if self.detections:
+                name, conf = max(self.detections, key=lambda x: x[1])
+                self.yolo_class = name
+                self.yolo_conf = conf
+            else:
+                self.yolo_class = "Desconhecido"
+                self.yolo_conf = 0.0
+
+            # Frame anotado pelo próprio Ultralytics
+            annotated = result.plot()
+            return annotated
+
+        except Exception as exc:
+            self.yolo_class = "Erro"
+            self.yolo_conf = 0.0
+            print("YOLO:", exc)
+            return frame
+
+    # -------------------------
+    # Fusão dos sensores + YOLO
+    # -------------------------
+
+    def _fusion(self):
+        """
+        Regra inicial acadêmica para integração.
+        A lógica pode ser substituída por um classificador treinado posteriormente.
+
+        Prioridade:
+        1. Indutivo = 1 -> Metal
+        2. YOLO + NIR concordantes -> maior confiança
+        3. YOLO sozinho
+        4. NIR sozinho
+        5. Desconhecido
+        """
+
+        # Indutivo identifica metal
+        if self.indutivo == 1:
+            sensor_conf = 0.95
+            if self.yolo_class.lower() in ("metal", "lata"):
+                sensor_conf = min(0.99, (sensor_conf + self.yolo_conf) / 2 + 0.10)
+            return "Metal", sensor_conf
+
+        # NIR
+        nir_class = max(self.nir, key=self.nir.get) if self.nir else "Desconhecido"
+        nir_conf = float(self.nir.get(nir_class, 0.0))
+
+        # Compatibiliza possíveis nomes do YOLO
+        yolo = self.yolo_class.lower()
+
+        yolo_to_simr = {
+            "metal": "Metal",
+            "lata": "Metal",
+            "pet": "PET",
+            "garrafa_pet": "PET",
+            "pead": "PEAD",
+            "hdpe": "PEAD",
+            "pp": "PP",
+            "vidro": "Vidro",
+            "glass": "Vidro",
+            "rejeito": "Rejeito",
+            "desconhecido": "Desconhecido",
+        }
+
+        yolo_simr = yolo_to_simr.get(yolo, self.yolo_class)
+
+        # NIR só possui classes plásticas neste protótipo.
+        if nir_class in ("PET", "PEAD", "PP") and nir_conf >= 0.55:
+            if yolo_simr == nir_class and self.yolo_conf >= 0.35:
+                return nir_class, min(0.99, 0.5 * nir_conf + 0.5 * self.yolo_conf + 0.10)
+
+            if self.yolo_conf < 0.35 or yolo_simr == "Desconhecido":
+                return nir_class, nir_conf
+
+        # YOLO
+        if self.yolo_conf >= CONF_THRESHOLD and yolo_simr in SIMR_CLASSES:
+            return yolo_simr, self.yolo_conf
+
+        return "Desconhecido", max(0.0, min(0.99, self.yolo_conf))
+
+    def _update_result_labels(self):
+        self.yolo_class_var.set(self.yolo_class)
+        self.yolo_conf_var.set(f"{self.yolo_conf * 100:.1f}%")
+
+        self.final_class, self.final_conf = self._fusion()
+
+        self.final_class_var.set(self.final_class)
+        self.final_conf_var.set(f"{self.final_conf * 100:.1f}%")
+
+    # -------------------------
+    # Câmera
+    # -------------------------
+
+    def start(self):
+        if self.running:
+            return
+
+        if cv2 is None:
+            messagebox.showerror(
+                "Dependência",
+                "OpenCV/Pillow não instalados.\n\n"
+                "Execute:\npip install opencv-python pillow"
+            )
+            return
+
+        self.camera = cv2.VideoCapture(CAMERA_INDEX)
+
+        if not self.camera.isOpened():
+            self.camera.release()
+            self.camera = None
+            messagebox.showerror("Câmera", "Não foi possível abrir a câmera.")
+            return
+
+        self.running = True
+        self.status_var.set("Sistema em execução")
+        self.mode_var.set("Câmera ativa + aquisição de sensores")
+
+        threading.Thread(target=self._camera_loop, daemon=True).start()
+
+        if self.demo_mode:
+            threading.Thread(target=self._demo_sensor_loop, daemon=True).start()
+
+    def stop(self):
+        self.running = False
+
+        if self.camera is not None:
+            self.camera.release()
+            self.camera = None
+
+        self.status_var.set("Sistema parado")
+
+    def _camera_loop(self):
+        while self.running and self.camera is not None:
+            ok, frame = self.camera.read()
+
+            if not ok:
+                continue
+
+            annotated = self._run_yolo(frame)
+            self._update_result_labels()
+
+            try:
+                self.frame_queue.put_nowait(annotated)
+            except queue.Full:
+                try:
+                    self.frame_queue.get_nowait()
+                    self.frame_queue.put_nowait(annotated)
+                except queue.Empty:
+                    pass
+
+            self.root.after(10, self._show_frame)
+            time.sleep(0.01)
+
+    def _show_frame(self):
+        try:
+            frame = self.frame_queue.get_nowait()
+        except queue.Empty:
+            return
+
+        if Image is None:
+            return
+
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        width = max(500, self.video_label.winfo_width())
+        height = max(350, self.video_label.winfo_height())
+
+        image = Image.fromarray(frame)
+        image.thumbnail((width, height))
+
+        photo = ImageTk.PhotoImage(image=image)
+        self.video_label.configure(image=photo, text="")
+        self.video_label.image = photo
+
+    def capture(self):
+        if self.camera is None:
+            messagebox.showwarning("Captura", "Inicie o sistema primeiro.")
+            return
+
+        ok, frame = self.camera.read()
+
+        if not ok:
+            messagebox.showerror("Captura", "Não foi possível capturar o quadro.")
+            return
+
+        annotated = self._run_yolo(frame)
+        filename = time.strftime("simr_%Y%m%d_%H%M%S.jpg")
+        cv2.imwrite(filename, annotated)
+        messagebox.showinfo("Captura", f"Imagem salva como:\n{filename}")
+
+    # -------------------------
+    # Sensores / ESP32
+    # -------------------------
+
+    def _demo_sensor_loop(self):
+        while self.running and self.demo_mode:
+            # Simulação simples para testar a interface sem ESP32.
+            material = random.choice(["Metal", "PET", "PP", "PEAD", "Vidro"])
+
+            self.indutivo = 1 if material == "Metal" else 0
+            self.capacitivo = 1
+
+            if material == "PET":
+                self.nir = {"PET": 0.85, "PEAD": 0.08, "PP": 0.04, "PVC": 0.03}
+            elif material == "PEAD":
+                self.nir = {"PET": 0.08, "PEAD": 0.82, "PP": 0.07, "PVC": 0.03}
+            elif material == "PP":
+                self.nir = {"PET": 0.06, "PEAD": 0.08, "PP": 0.83, "PVC": 0.03}
+            else:
+                self.nir = {"PET": 0.10, "PEAD": 0.10, "PP": 0.10, "PVC": 0.05}
+
+            self._refresh_sensor_labels()
+            time.sleep(2)
+
+    def _refresh_sensor_labels(self):
+        self.sensor_labels["capacitivo"].set(str(self.capacitivo))
+        self.sensor_labels["indutivo"].set(str(self.indutivo))
+
+        for name, value in self.nir.items():
+            if name in self.sensor_labels:
+                self.sensor_labels[name].set(f"{value:.2f}")
+
+    def update_ports(self):
+        if serial is None:
+            self.port_combo["values"] = []
+            return
+
+        ports = [p.device for p in serial.tools.list_ports.comports()]
+        self.port_combo["values"] = ports
+
+        if ports and not self.port_var.get():
+            self.port_var.set(ports[0])
+
+    def connect_serial(self):
+        if serial is None:
+            messagebox.showerror(
+                "PySerial",
+                "Instale a biblioteca:\npip install pyserial"
+            )
+            return
+
+        port = self.port_var.get().strip()
+
+        if not port:
+            messagebox.showwarning("ESP32", "Selecione uma porta serial.")
+            return
+
+        try:
+            self.serial_conn = serial.Serial(
+                port=port,
+                baudrate=SERIAL_BAUD,
+                timeout=1
+            )
+
+            self.demo_mode = False
+            self.mode_var.set(f"ESP32 conectado em {port}")
+            self.status_var.set("Recebendo dados do ESP32")
+
+            threading.Thread(target=self._serial_loop, daemon=True).start()
+
+        except Exception as exc:
+            messagebox.showerror("ESP32", f"Erro ao conectar:\n{exc}")
+
+    def _serial_loop(self):
+        while self.running or self.serial_conn is not None:
+            if self.serial_conn is None:
+                break
+
+            try:
+                line = self.serial_conn.readline().decode(
+                    "utf-8", errors="ignore"
+                ).strip()
+
+                if not line:
+                    continue
+
+                data = json.loads(line)
+
+                self.capacitivo = int(data.get("capacitivo", 0))
+                self.indutivo = int(data.get("indutivo", 0))
+
+                nir_data = data.get("nir", {})
+                for key in self.nir:
+                    self.nir[key] = float(nir_data.get(key, 0.0))
+
+                self.root.after(0, self._refresh_sensor_labels)
+
+            except json.JSONDecodeError:
+                continue
+            except Exception as exc:
+                print("Serial:", exc)
+                time.sleep(0.2)
+
+    # -------------------------
+    # Encerramento
+    # -------------------------
+
+    def close(self):
+        self.running = False
+
+        if self.camera is not None:
+            self.camera.release()
+
+        if self.serial_conn is not None:
+            try:
+                self.serial_conn.close()
+            except Exception:
+                pass
+
+        self.root.destroy()
+
+
+def main():
+    root = tk.Tk()
+    app = SIMRInterface(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+path = Path("/mnt/data/simr_interface_yolov8.py")
+path.write_text(code, encoding="utf-8")
+
+req = """ultralytics
+opencv-python
+pyserial
+pillow
+numpy
+"""
+req_path = Path("/mnt/data/requirements_simr.txt")
+req_path.write_text(req, encoding="utf-8")
+
+print(f"Arquivo criado: {path}")
+print(f"Dependências: {req_path}")
+
