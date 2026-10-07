@@ -10,7 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 MODELO = (
     BASE_DIR
     / "modelo"
-    / "best.pt"
+    / "best_v2.pt"
 )
 
 # ---------------------------------------------------------
@@ -68,15 +68,13 @@ def detectar_material(imagem):
 # TESTE
 # ---------------------------------------------------------
 
+# ---------------------------------------------------------
+# TESTE
+# ---------------------------------------------------------
+
 if __name__ == "__main__":
 
-    imagem = (
-        BASE_DIR
-        / "SIMR_DATASET"
-        / "test"
-        / "images"
-        / "trash_trash97.jpg"
-    )
+    imagem = BASE_DIR / "teste_real2.jpeg"
 
     resultado = detectar_material(str(imagem))
 
