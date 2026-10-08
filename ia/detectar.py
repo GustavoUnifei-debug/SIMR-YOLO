@@ -1,17 +1,37 @@
-from ultralytics import YOLO
+
+import os
+import time
 from pathlib import Path
 
 # ---------------------------------------------------------
-# CONFIGURACAO
+# CONFIGURACAO DE CPU
+# ---------------------------------------------------------
+# Configurar antes de importar torch/ultralytics.
+
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
+import torch
+from ultralytics import YOLO
+
+
+# ---------------------------------------------------------
+# CONFIGURACAO DO PROJETO
 # ---------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-MODELO = (
-    BASE_DIR
-    / "modelo"
-    / "best_v2.pt"
-)
+MODELO = BASE_DIR / "modelo" / "best_v2.pt"
+
+# Configuracoes de inferencia
+TAMANHO_IMAGEM = 320
+CONFIANCA_MINIMA = 0.25
+DISPOSITIVO = "cpu"
+
+# Limitar threads para evitar sobrecarga
+torch.set_num_threads(1)
+
 
 # ---------------------------------------------------------
 # CARREGAR MODELO
@@ -22,18 +42,25 @@ print("Carregando IA do SIMR...")
 model = YOLO(str(MODELO))
 
 print("Modelo carregado com sucesso.")
+print(f"Dispositivo: {DISPOSITIVO}")
+print(f"Resolucao de inferencia: {TAMANHO_IMAGEM}")
+print(f"Threads CPU: {torch.get_num_threads()}")
 
 
 # ---------------------------------------------------------
 # FUNCAO DE DETECCAO
 # ---------------------------------------------------------
 
-
 def detectar_material(imagem):
 
+    inicio = time.perf_counter()
+
+    # Executar YOLOv8 V2
     resultados = model.predict(
-        source=imagem,
-        conf=0.25,
+        source=str(imagem),
+        imgsz=TAMANHO_IMAGEM,
+        conf=CONFIANCA_MINIMA,
+        device=DISPOSITIVO,
         verbose=False
     )
 
@@ -41,6 +68,18 @@ def detectar_material(imagem):
 
     # Dimensoes originais da imagem
     altura, largura = resultado.orig_shape
+
+    # Tempo de processamento
+    tempo_ia = time.perf_counter() - inicio
+
+    print(
+        f"[SIMR IA] Inferencia={tempo_ia:.3f}s",
+        flush=True
+    )
+
+    # -----------------------------------------------------
+    # NENHUMA DETECCAO
+    # -----------------------------------------------------
 
     if len(resultado.boxes) == 0:
 
@@ -53,7 +92,10 @@ def detectar_material(imagem):
             "altura": altura
         }
 
-    # Mantem a deteccao de maior confianca
+    # -----------------------------------------------------
+    # SELECIONAR MELHOR DETECCAO
+    # -----------------------------------------------------
+
     melhor_box = max(
         resultado.boxes,
         key=lambda box: float(box.conf[0])
@@ -63,13 +105,19 @@ def detectar_material(imagem):
     confianca = float(melhor_box.conf[0])
     classe = model.names[classe_id]
 
-    # Coordenadas do retangulo:
-    # x1, y1 = canto superior esquerdo
-    # x2, y2 = canto inferior direito
+    # -----------------------------------------------------
+    # COORDENADAS DO OBJETO
+    # -----------------------------------------------------
+    # Coordenadas na resolucao ORIGINAL da imagem.
+
     x1, y1, x2, y2 = [
         float(valor)
         for valor in melhor_box.xyxy[0].tolist()
     ]
+
+    # -----------------------------------------------------
+    # RESULTADO
+    # -----------------------------------------------------
 
     return {
         "detectado": True,
@@ -86,13 +134,8 @@ def detectar_material(imagem):
     }
 
 
-
 # ---------------------------------------------------------
-# TESTE
-# ---------------------------------------------------------
-
-# ---------------------------------------------------------
-# TESTE
+# TESTE LOCAL
 # ---------------------------------------------------------
 
 if __name__ == "__main__":
@@ -107,14 +150,14 @@ if __name__ == "__main__":
 
     if resultado["detectado"]:
 
-        print(
-            f"Material: {resultado['classe']}"
-        )
+        print(f"Material: {resultado['classe']}")
 
         print(
             f"Confianca: "
             f"{resultado['confianca'] * 100:.2f}%"
         )
+
+        print(f"Coordenadas: {resultado['bbox']}")
 
     else:
 
