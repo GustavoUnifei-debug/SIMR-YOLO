@@ -1,4 +1,5 @@
- <!DOCTYPE html>
+
+<!DOCTYPE html>
 <html lang="pt-BR">
 
 <head>
@@ -54,7 +55,8 @@
             color: #16324f;
         }
 
-        .modo-botoes {
+        .modo-botoes,
+        .controles {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 15px;
@@ -68,14 +70,14 @@
             border-radius: 8px;
             background: #16324f;
             color: white;
-            font-size: 17px;
+            font-size: 16px;
             font-weight: bold;
             cursor: pointer;
-            margin-top: 15px;
+            margin-top: 10px;
         }
 
         button:hover {
-            background: #244e73;
+            opacity: 0.9;
         }
 
         button:disabled {
@@ -87,15 +89,20 @@
             background: #475569;
         }
 
+        .botao-iniciar {
+            background: #16734a;
+        }
+
+        .botao-parar {
+            background: #b42318;
+        }
+
         .upload-area {
+            display: none;
             border: 2px dashed #9ca3af;
             border-radius: 10px;
             padding: 30px;
             text-align: center;
-        }
-
-        input[type="file"] {
-            margin: 15px 0;
         }
 
         #cameraArea {
@@ -103,16 +110,32 @@
             margin-top: 20px;
         }
 
+        .video-container {
+            position: relative;
+            width: 100%;
+            background: black;
+            border-radius: 10px;
+            overflow: hidden;
+            line-height: 0;
+        }
+
         #video {
             display: block;
             width: 100%;
+            height: auto;
             max-height: 450px;
-            background: black;
-            border-radius: 10px;
             object-fit: contain;
         }
 
-        #canvas {
+        #overlay {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        #canvasCaptura {
             display: none;
         }
 
@@ -129,6 +152,28 @@
             color: #6b7280;
             margin-top: 10px;
             font-size: 14px;
+        }
+
+        .seletor {
+            margin: 20px 0;
+        }
+
+        select {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #9ca3af;
+            margin-top: 8px;
+            font-size: 16px;
+        }
+
+        #statusTempoReal {
+            background: #eef2f7;
+            border-radius: 8px;
+            padding: 14px;
+            text-align: center;
+            margin: 15px 0;
         }
 
         .resultado {
@@ -158,10 +203,6 @@
             font-size: 20px;
         }
 
-        .status {
-            color: green;
-        }
-
         #erro {
             display: none;
             background: #fee2e2;
@@ -178,8 +219,9 @@
         }
 
         @media (max-width: 600px) {
-            .resultado-grid,
-            .modo-botoes {
+            .modo-botoes,
+            .controles,
+            .resultado-grid {
                 grid-template-columns: 1fr;
             }
 
@@ -200,6 +242,7 @@
 <header>
     <h1>SIMR</h1>
     <p>Sistema de Identificação de Materiais Recicláveis</p>
+    <p>Visão Computacional - YOLOv8 V2</p>
 </header>
 
 <div class="container">
@@ -209,102 +252,110 @@
         <h2>Análise de Material</h2>
 
         <p>
-            Utilize a câmera do dispositivo ou envie uma imagem
-            para identificação pelo modelo YOLOv8.
+            Utilize a câmera ou envie uma imagem para
+            identificar materiais recicláveis.
         </p>
 
         <div class="modo-botoes">
-
             <button onclick="abrirCamera()">
                 📷 USAR CÂMERA
             </button>
 
-            <button
-                class="botao-secundario"
-                onclick="selecionarArquivo()"
-            >
+            <button class="botao-secundario"
+                    onclick="selecionarArquivo()">
                 🖼 ENVIAR IMAGEM
             </button>
-
         </div>
 
-        <!-- CÂMERA -->
-
+        <!-- CAMERA -->
         <div id="cameraArea">
 
-            <video
-                id="video"
-                autoplay
-                playsinline
-                muted
-            ></video>
+            <div class="video-container">
+                <video id="video"
+                       autoplay
+                       playsinline
+                       muted></video>
+
+                <canvas id="overlay"></canvas>
+            </div>
 
             <p class="camera-info">
-                Posicione o material no centro da imagem.
+                Posicione o objeto em frente à câmera.
             </p>
 
+            <div class="seletor">
+                <label for="tipoMarcacao">
+                    <strong>Tipo de marcação</strong>
+                </label>
+
+                <select id="tipoMarcacao">
+                    <option value="retangulo">
+                        Retângulo
+                    </option>
+
+                    <option value="circulo">
+                        Círculo
+                    </option>
+                </select>
+            </div>
+
+            <div class="controles">
+                <button id="botaoIniciar"
+                        class="botao-iniciar"
+                        onclick="iniciarTempoReal()">
+                    ▶ INICIAR DETECÇÃO
+                </button>
+
+                <button id="botaoParar"
+                        class="botao-parar"
+                        onclick="pararTempoReal()"
+                        disabled>
+                    ■ PARAR DETECÇÃO
+                </button>
+            </div>
+
+            <div id="statusTempoReal">
+                Câmera pronta. Detecção parada.
+            </div>
+
             <button onclick="capturarFoto()">
-                CAPTURAR FOTO
+                📸 CAPTURAR FOTO
             </button>
 
-            <button
-                class="botao-secundario"
-                onclick="fecharCamera()"
-            >
+            <button class="botao-secundario"
+                    onclick="fecharCamera()">
                 FECHAR CÂMERA
             </button>
-
         </div>
 
-        <!-- CANVAS UTILIZADO PARA CAPTURA -->
+        <!-- CANVAS DE CAPTURA -->
+        <canvas id="canvasCaptura"></canvas>
 
-        <canvas id="canvas"></canvas>
-
-        <!-- UPLOAD -->
-
-        <div
-            class="upload-area"
-            id="uploadArea"
-            style="display:none;"
-        >
-
+        <!-- ENVIO DE IMAGEM -->
+        <div class="upload-area" id="uploadArea">
             <strong>Selecione uma imagem</strong>
 
-            <br>
-
-            <input
-                type="file"
-                id="arquivo"
-                accept="image/*"
-            >
-
+            <p>
+                <input type="file"
+                       id="arquivo"
+                       accept="image/jpeg,image/png,image/webp">
+            </p>
         </div>
 
-        <!-- PREVIEW DA IMAGEM -->
+        <img id="preview"
+             alt="Pré-visualização da imagem">
 
-        <img
-            id="preview"
-            alt="Pré-visualização da imagem"
-        >
-
-        <button
-            id="botaoAnalisar"
-            onclick="analisarImagem()"
-            style="display:none;"
-        >
+        <button id="botaoAnalisar"
+                onclick="analisarImagem()"
+                style="display:none">
             ANALISAR MATERIAL
         </button>
 
         <div id="erro"></div>
-
     </div>
 
     <!-- RESULTADO -->
-
-    <div
-        class="card resultado"
-        id="resultado"
-    >
+    <div class="card resultado" id="resultado">
 
         <h2>Resultado da Identificação</h2>
 
@@ -322,16 +373,15 @@
 
             <div class="item">
                 <span>Modelo</span>
-                <strong>YOLOv8</strong>
+                <strong>YOLOv8 V2</strong>
             </div>
 
             <div class="item">
                 <span>Status</span>
-                <strong class="status" id="status">-</strong>
+                <strong id="status">-</strong>
             </div>
 
         </div>
-
     </div>
 
 </div>
@@ -341,47 +391,372 @@
 </footer>
 
 <script>
+    // =====================================================
+    // ELEMENTOS DA INTERFACE
+    // =====================================================
 
     const arquivoInput = document.getElementById("arquivo");
     const preview = document.getElementById("preview");
     const video = document.getElementById("video");
-    const canvas = document.getElementById("canvas");
+    const canvas = document.getElementById("canvasCaptura");
+    const overlay = document.getElementById("overlay");
+
     const cameraArea = document.getElementById("cameraArea");
     const uploadArea = document.getElementById("uploadArea");
     const botaoAnalisar = document.getElementById("botaoAnalisar");
+
+    const botaoIniciar = document.getElementById("botaoIniciar");
+    const botaoParar = document.getElementById("botaoParar");
+
+    const statusTempoReal =
+        document.getElementById("statusTempoReal");
+
+    const tipoMarcacao =
+        document.getElementById("tipoMarcacao");
+
     const erro = document.getElementById("erro");
     const resultado = document.getElementById("resultado");
 
+    const nomes = {
+        cardboard: "PAPELÃO",
+        glass: "VIDRO",
+        metal: "METAL",
+        paper: "PAPEL",
+        plastic: "PLÁSTICO"
+    };
+
     let streamCamera = null;
     let imagemCapturada = null;
+    let urlPreview = null;
 
+    let tempoRealAtivo = false;
+    let timerDeteccao = null;
+    let controladorDeteccao = null;
+    let ultimaDeteccao = null;
+
+    let geracaoCamera = 0;
 
     // =====================================================
-    // ABRIR CÂMERA
+    // ESTABILIZACAO TEMPORAL
+    // =====================================================
+
+    let historicoDeteccoes = [];
+
+    const JANELA_DETECCOES = 5;
+    const VOTOS_MINIMOS = 3;
+
+    // Tempo adicional entre análises
+    const INTERVALO_MS = 700;
+
+    function estabilizarDeteccao(dados) {
+
+        // Se nao houver objeto, limpa o historico.
+        if (!dados.sucesso) {
+            historicoDeteccoes = [];
+            return null;
+        }
+
+        historicoDeteccoes.push(dados);
+
+        // Mantem somente as ultimas 5 deteccoes
+        if (historicoDeteccoes.length > JANELA_DETECCOES) {
+            historicoDeteccoes.shift();
+        }
+
+        // Aguarda pelo menos 3 observacoes
+        if (historicoDeteccoes.length < VOTOS_MINIMOS) {
+            return null;
+        }
+
+        const contagem = {};
+
+        for (const deteccao of historicoDeteccoes) {
+            const classe = deteccao.material;
+
+            contagem[classe] =
+                (contagem[classe] || 0) + 1;
+        }
+
+        const classeVencedora =
+            Object.keys(contagem).reduce(
+                (a, b) =>
+                    contagem[a] >= contagem[b] ? a : b
+            );
+
+        if (
+            contagem[classeVencedora] <
+            VOTOS_MINIMOS
+        ) {
+            return null;
+        }
+
+        // Seleciona a ultima deteccao real
+        // da classe vencedora.
+        const deteccoesVencedoras =
+            historicoDeteccoes.filter(
+                item =>
+                    item.material === classeVencedora
+            );
+
+        return deteccoesVencedoras[
+            deteccoesVencedoras.length - 1
+        ];
+    }
+
+    // =====================================================
+    // MENSAGENS
+    // =====================================================
+
+    function mostrarErro(mensagem) {
+        erro.innerText = mensagem;
+        erro.style.display = "block";
+    }
+
+    function limparErro() {
+        erro.style.display = "none";
+    }
+
+    // =====================================================
+    // PREVIEW
+    // =====================================================
+
+    function limparPreview() {
+        preview.style.display = "none";
+        preview.removeAttribute("src");
+
+        if (urlPreview) {
+            URL.revokeObjectURL(urlPreview);
+            urlPreview = null;
+        }
+
+        botaoAnalisar.style.display = "none";
+    }
+
+    function mostrarPreview(blob) {
+        limparPreview();
+
+        urlPreview = URL.createObjectURL(blob);
+        preview.src = urlPreview;
+        preview.style.display = "block";
+        botaoAnalisar.style.display = "block";
+    }
+
+    // =====================================================
+    // RESULTADO
+    // =====================================================
+
+    function mostrarResultado(dados) {
+        const nome =
+            nomes[dados.material] ||
+            String(dados.material).toUpperCase();
+
+        document.getElementById("material").innerText =
+            nome;
+
+        document.getElementById("confianca").innerText =
+            Number(dados.confianca).toFixed(2) + " %";
+
+        document.getElementById("status").innerText =
+            "DETECTADO";
+
+        resultado.style.display = "block";
+    }
+
+    // =====================================================
+    // CANVAS DE MARCACAO
+    // =====================================================
+
+    function limparMarcacao() {
+        const contexto = overlay.getContext("2d");
+
+        contexto.clearRect(
+            0, 0,
+            overlay.width,
+            overlay.height
+        );
+    }
+
+    function ajustarOverlay() {
+        if (!video.videoWidth || !video.videoHeight) {
+            return;
+        }
+
+        if (
+            overlay.width !== video.videoWidth ||
+            overlay.height !== video.videoHeight
+        ) {
+            overlay.width = video.videoWidth;
+            overlay.height = video.videoHeight;
+        }
+    }
+
+    // =====================================================
+    // DESENHAR RETANGULO OU CIRCULO
+    // =====================================================
+
+    function desenharMarcacao(dados) {
+        ajustarOverlay();
+        limparMarcacao();
+
+        if (
+            !dados ||
+            !dados.sucesso ||
+            !Array.isArray(dados.bbox) ||
+            dados.bbox.length !== 4 ||
+            !dados.largura ||
+            !dados.altura
+        ) {
+            return;
+        }
+
+        const valores = dados.bbox.map(Number);
+
+        if (!valores.every(Number.isFinite)) {
+            return;
+        }
+
+        const [x1, y1, x2, y2] = valores;
+
+        const escalaX =
+            overlay.width / dados.largura;
+
+        const escalaY =
+            overlay.height / dados.altura;
+
+        const esquerda = x1 * escalaX;
+        const topo = y1 * escalaY;
+        const direita = x2 * escalaX;
+        const baixo = y2 * escalaY;
+
+        const largura = direita - esquerda;
+        const altura = baixo - topo;
+
+        const contexto = overlay.getContext("2d");
+
+        contexto.strokeStyle = "#00ff88";
+        contexto.fillStyle = "#00ff88";
+        contexto.lineWidth = Math.max(
+            3,
+            overlay.width / 250
+        );
+
+        if (tipoMarcacao.value === "circulo") {
+            const centroX =
+                (esquerda + direita) / 2;
+
+            const centroY =
+                (topo + baixo) / 2;
+
+            // Circulo reduzido e centralizado
+            const raio =
+                Math.max(largura, altura) * 0.55;
+
+            contexto.beginPath();
+            contexto.arc(
+                centroX,
+                centroY,
+                raio,
+                0,
+                Math.PI * 2
+            );
+            contexto.stroke();
+
+        } else {
+            contexto.strokeRect(
+                esquerda,
+                topo,
+                largura,
+                altura
+            );
+        }
+
+        const nome =
+            nomes[dados.material] ||
+            String(dados.material).toUpperCase();
+
+        const texto =
+            nome + " " +
+            Number(dados.confianca).toFixed(1) + "%";
+
+        const tamanhoFonte = Math.max(
+            17,
+            overlay.width / 40
+        );
+
+        contexto.font =
+            `bold ${tamanhoFonte}px Arial`;
+
+        const padding = 8;
+
+        const textoLargura =
+            contexto.measureText(texto).width;
+
+        const caixaLargura =
+            textoLargura + padding * 2;
+
+        const caixaAltura =
+            tamanhoFonte + padding * 2;
+
+        const textoX = Math.max(
+            0,
+            Math.min(
+                esquerda,
+                overlay.width - caixaLargura
+            )
+        );
+
+        const textoY = Math.max(
+            0,
+            topo - caixaAltura
+        );
+
+        contexto.fillRect(
+            textoX,
+            textoY,
+            caixaLargura,
+            caixaAltura
+        );
+
+        contexto.fillStyle = "#102d20";
+
+        contexto.fillText(
+            texto,
+            textoX + padding,
+            textoY + padding + tamanhoFonte
+        );
+    }
+
+    tipoMarcacao.addEventListener("change", () => {
+        desenharMarcacao(ultimaDeteccao);
+    });
+
+    // =====================================================
+    // ABRIR CAMERA
     // =====================================================
 
     async function abrirCamera() {
+        limparErro();
 
-        erro.style.display = "none";
         resultado.style.display = "none";
         uploadArea.style.display = "none";
 
-        preview.style.display = "none";
-        botaoAnalisar.style.display = "none";
+        limparPreview();
 
         imagemCapturada = null;
+        arquivoInput.value = "";
+
+        fecharCamera();
+
+        const geracao = ++geracaoCamera;
 
         try {
-
-            if (!navigator.mediaDevices ||
-                !navigator.mediaDevices.getUserMedia) {
-
+            if (!navigator.mediaDevices?.getUserMedia) {
                 throw new Error(
-                    "Navegador sem suporte à câmera."
+                    "Câmera indisponível. Use localhost ou HTTPS."
                 );
             }
 
-            streamCamera =
+            const stream =
                 await navigator.mediaDevices.getUserMedia({
                     video: {
                         facingMode: {
@@ -391,347 +766,464 @@
                     audio: false
                 });
 
+            if (geracao !== geracaoCamera) {
+                stream.getTracks().forEach(
+                    track => track.stop()
+                );
+                return;
+            }
+
+            streamCamera = stream;
             video.srcObject = streamCamera;
 
             cameraArea.style.display = "block";
 
-        }
+            await video.play();
 
-        catch (e) {
+            ajustarOverlay();
+            limparMarcacao();
 
-            erro.innerText =
-                "Não foi possível acessar a câmera. Verifique a permissão do navegador.";
+            statusTempoReal.innerText =
+                "Câmera pronta. Detecção parada.";
 
-            erro.style.display = "block";
+        } catch (e) {
+            if (geracao !== geracaoCamera) {
+                return;
+            }
 
+            fecharCamera();
+
+            mostrarErro(
+                "Não foi possível abrir a câmera: " +
+                e.message
+            );
         }
     }
 
+    // =====================================================
+    // PARAR DETECCAO
+    // =====================================================
+
+    function pararTempoReal() {
+        tempoRealAtivo = false;
+
+        if (timerDeteccao !== null) {
+            clearTimeout(timerDeteccao);
+            timerDeteccao = null;
+        }
+
+        if (controladorDeteccao) {
+            controladorDeteccao.abort();
+            controladorDeteccao = null;
+        }
+
+        botaoIniciar.disabled = false;
+        botaoParar.disabled = true;
+
+        ultimaDeteccao = null;
+        historicoDeteccoes = [];
+
+        limparMarcacao();
+
+        statusTempoReal.innerText =
+            "Detecção parada.";
+    }
 
     // =====================================================
-    // FECHAR CÂMERA
+    // FECHAR CAMERA
     // =====================================================
 
     function fecharCamera() {
+        ++geracaoCamera;
+        pararTempoReal();
 
         if (streamCamera) {
-
-            streamCamera
-                .getTracks()
-                .forEach(track => track.stop());
+            streamCamera.getTracks().forEach(
+                track => track.stop()
+            );
 
             streamCamera = null;
         }
 
+        video.pause();
         video.srcObject = null;
 
         cameraArea.style.display = "none";
     }
-
 
     // =====================================================
     // CAPTURAR FOTO
     // =====================================================
 
     function capturarFoto() {
-
-        if (!streamCamera) {
-
-            erro.innerText =
-                "Abra a câmera primeiro.";
-
-            erro.style.display = "block";
-
+        if (
+            !streamCamera ||
+            !video.videoWidth ||
+            !video.videoHeight
+        ) {
+            mostrarErro(
+                "A câmera ainda não está pronta."
+            );
             return;
         }
 
-        if (!video.videoWidth || !video.videoHeight) {
-
-            erro.innerText =
-                "A câmera ainda está iniciando. Aguarde alguns segundos.";
-
-            erro.style.display = "block";
-
-            return;
-        }
+        pararTempoReal();
 
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
 
-        const contexto =
-            canvas.getContext("2d");
-
-        contexto.drawImage(
+        canvas.getContext("2d").drawImage(
             video,
-            0,
-            0,
+            0, 0,
             canvas.width,
             canvas.height
         );
 
-        canvas.toBlob(
+        canvas.toBlob(blob => {
+            if (!blob) {
+                mostrarErro(
+                    "Não foi possível capturar a foto."
+                );
+                return;
+            }
 
-            function(blob) {
+            imagemCapturada = blob;
+            mostrarPreview(blob);
+            fecharCamera();
 
-                if (!blob) {
-
-                    erro.innerText =
-                        "Não foi possível capturar a imagem.";
-
-                    erro.style.display = "block";
-
-                    return;
-                }
-
-                imagemCapturada = blob;
-
-                preview.src =
-                    URL.createObjectURL(blob);
-
-                preview.style.display =
-                    "block";
-
-                botaoAnalisar.style.display =
-                    "block";
-
-                fecharCamera();
-
-            },
-
-            "image/jpeg",
-
-            0.92
-        );
+        }, "image/jpeg", 0.85);
     }
-
 
     // =====================================================
     // SELECIONAR ARQUIVO
     // =====================================================
 
     function selecionarArquivo() {
-
         fecharCamera();
+        limparErro();
 
-        erro.style.display = "none";
         resultado.style.display = "none";
 
         imagemCapturada = null;
-
-        preview.style.display = "none";
-        botaoAnalisar.style.display = "none";
+        limparPreview();
 
         uploadArea.style.display = "block";
-
         arquivoInput.click();
     }
 
+    arquivoInput.addEventListener("change", () => {
+        const arquivo = arquivoInput.files[0];
 
-    // =====================================================
-    // PREVIEW DO ARQUIVO
-    // =====================================================
-
-    arquivoInput.addEventListener(
-        "change",
-        function () {
-
-            const arquivo =
-                arquivoInput.files[0];
-
-            if (!arquivo) {
-
-                preview.style.display =
-                    "none";
-
-                botaoAnalisar.style.display =
-                    "none";
-
-                return;
-            }
-
-            imagemCapturada = null;
-
-            preview.src =
-                URL.createObjectURL(arquivo);
-
-            preview.style.display =
-                "block";
-
-            botaoAnalisar.style.display =
-                "block";
+        if (!arquivo) {
+            return;
         }
-    );
 
+        imagemCapturada = null;
+        mostrarPreview(arquivo);
+    });
+
+    // =====================================================
+    // ENVIAR IMAGEM PARA A API
+    // =====================================================
+
+    async function enviarParaAPI(arquivo, signal) {
+        const dados = new FormData();
+
+        dados.append(
+            "arquivo",
+            arquivo,
+            arquivo.name || "imagem.jpg"
+        );
+
+        const resposta = await fetch("/detectar", {
+            method: "POST",
+            body: dados,
+            signal: signal
+        });
+
+        const dadosResposta = await resposta.json();
+
+        if (!resposta.ok) {
+            throw new Error(
+                dadosResposta.erro ||
+                dadosResposta.detail ||
+                "Erro na comunicação com a API."
+            );
+        }
+
+        return dadosResposta;
+    }
 
     // =====================================================
     // ANALISAR IMAGEM
     // =====================================================
 
     async function analisarImagem() {
+        limparErro();
 
-        erro.style.display = "none";
-
-        let arquivoParaEnviar = null;
+        let arquivo = null;
 
         if (imagemCapturada) {
+            arquivo = new File(
+                [imagemCapturada],
+                "captura_camera.jpg",
+                { type: "image/jpeg" }
+            );
 
-            arquivoParaEnviar =
-                new File(
-                    [imagemCapturada],
-                    "captura_camera.jpg",
-                    {
-                        type: "image/jpeg"
-                    }
-                );
-
+        } else if (arquivoInput.files[0]) {
+            arquivo = arquivoInput.files[0];
         }
 
-        else if (arquivoInput.files[0]) {
-
-            arquivoParaEnviar =
-                arquivoInput.files[0];
-        }
-
-
-        if (!arquivoParaEnviar) {
-
-            erro.innerText =
-                "Capture ou selecione uma imagem primeiro.";
-
-            erro.style.display =
-                "block";
-
+        if (!arquivo) {
+            mostrarErro(
+                "Capture ou selecione uma imagem."
+            );
             return;
         }
 
-
-        const dados =
-            new FormData();
-
-        dados.append(
-            "arquivo",
-            arquivoParaEnviar
-        );
-
-
         try {
-
-            botaoAnalisar.disabled =
-                true;
-
+            botaoAnalisar.disabled = true;
             botaoAnalisar.innerText =
                 "ANALISANDO...";
 
+            const dados =
+                await enviarParaAPI(arquivo);
 
-            const resposta =
-                await fetch(
-                    "/detectar",
-                    {
-                        method: "POST",
-                        body: dados
-                    }
-                );
-
-
-            if (!resposta.ok) {
-
-                let mensagem =
-                    "Erro na comunicação com a API.";
-
-                try {
-
-                    const detalhe =
-                        await resposta.json();
-
-                    if (detalhe.detail) {
-                        mensagem =
-                            detalhe.detail;
-                    }
-
-                }
-
-                catch (_) {}
-
-                throw new Error(mensagem);
-            }
-
-
-            const dadosResposta =
-                await resposta.json();
-
-
-            if (dadosResposta.sucesso) {
-
-                document.getElementById(
-                    "material"
-                ).innerText =
-                    dadosResposta.material.toUpperCase();
-
-
-                document.getElementById(
-                    "confianca"
-                ).innerText =
-                    dadosResposta.confianca + " %";
-
-
-                document.getElementById(
-                    "status"
-                ).innerText =
-                    "DETECTADO";
-
-
-                resultado.style.display =
-                    "block";
-
+            if (dados.sucesso) {
+                mostrarResultado(dados);
 
                 resultado.scrollIntoView({
                     behavior: "smooth",
                     block: "start"
                 });
 
+            } else {
+                resultado.style.display = "none";
+
+                mostrarErro(
+                    "Nenhum material foi detectado."
+                );
             }
 
-            else {
+        } catch (e) {
+            mostrarErro("Erro: " + e.message);
 
-                erro.innerText =
-                    "Nenhum material foi detectado.";
-
-                erro.style.display =
-                    "block";
-
-                resultado.style.display =
-                    "none";
-            }
-
-        }
-
-        catch (e) {
-
-            erro.innerText =
-                "Erro: " + e.message;
-
-            erro.style.display =
-                "block";
-
-        }
-
-        finally {
-
-            botaoAnalisar.disabled =
-                false;
+        } finally {
+            botaoAnalisar.disabled = false;
 
             botaoAnalisar.innerText =
                 "ANALISAR MATERIAL";
         }
     }
 
+    // =====================================================
+    // INICIAR DETECCAO EM TEMPO REAL
+    // =====================================================
 
-    // Desliga a câmera caso o usuário saia da página.
+    function iniciarTempoReal() {
+        if (
+            !streamCamera ||
+            !video.videoWidth ||
+            !video.videoHeight
+        ) {
+            mostrarErro(
+                "Abra a câmera e aguarde a imagem aparecer."
+            );
+            return;
+        }
+
+        if (tempoRealAtivo) {
+            return;
+        }
+
+        limparErro();
+
+        historicoDeteccoes = [];
+        ultimaDeteccao = null;
+
+        tempoRealAtivo = true;
+
+        botaoIniciar.disabled = true;
+        botaoParar.disabled = false;
+
+        statusTempoReal.innerText =
+            "Iniciando detecção...";
+
+        executarDeteccao();
+    }
+
+    // =====================================================
+    // PROCESSAMENTO CONTINUO
+    // =====================================================
+
+    async function executarDeteccao() {
+        if (!tempoRealAtivo || !streamCamera) {
+            return;
+        }
+
+        const geracao = geracaoCamera;
+
+        const largura = Math.min(
+            video.videoWidth,
+            640
+        );
+
+        const altura = Math.round(
+            largura *
+            video.videoHeight /
+            video.videoWidth
+        );
+
+        canvas.width = largura;
+        canvas.height = altura;
+
+        canvas.getContext("2d").drawImage(
+            video,
+            0, 0,
+            largura,
+            altura
+        );
+
+        const blob = await new Promise(resolve => {
+            canvas.toBlob(
+                resolve,
+                "image/jpeg",
+                0.75
+            );
+        });
+
+        if (
+            !tempoRealAtivo ||
+            geracao !== geracaoCamera
+        ) {
+            return;
+        }
+
+        if (!blob) {
+            pararTempoReal();
+
+            statusTempoReal.innerText =
+                "Erro ao capturar quadro.";
+            return;
+        }
+
+        const arquivo = new File(
+            [blob],
+            "quadro_camera.jpg",
+            { type: "image/jpeg" }
+        );
+
+        const controlador = new AbortController();
+        controladorDeteccao = controlador;
+
+        try {
+            statusTempoReal.innerText =
+                "Analisando imagem...";
+
+            const dados = await enviarParaAPI(
+                arquivo,
+                controlador.signal
+            );
+
+            if (
+                !tempoRealAtivo ||
+                geracao !== geracaoCamera
+            ) {
+                return;
+            }
+
+// Estabiliza a classe usando as ultimas deteccoes
+const dadosEstaveis = estabilizarDeteccao(dados);
+
+// Utiliza a posicao mais recente do objeto
+if (dadosEstaveis && dados.sucesso) {
+
+    const dadosMarcacao = {
+        ...dados,
+
+        // Nome estabilizado pela votacao
+        material: dadosEstaveis.material,
+
+        // Coordenadas e confianca da deteccao atual
+        bbox: dados.bbox,
+        largura: dados.largura,
+        altura: dados.altura
+    };
+
+    ultimaDeteccao = dadosMarcacao;
+
+    desenharMarcacao(dadosMarcacao);
+
+} else {
+
+    ultimaDeteccao = null;
+    limparMarcacao();
+
+}
+
+            if (dadosEstaveis) {
+                mostrarResultado(dadosEstaveis);
+
+                const nome =
+                    nomes[dadosEstaveis.material] ||
+                    dadosEstaveis.material;
+
+                statusTempoReal.innerText =
+                    "Detectado: " + nome +
+                    " | Confiança: " +
+                    Number(
+                        dadosEstaveis.confianca
+                    ).toFixed(2) +
+                    "%";
+
+            } else {
+                resultado.style.display = "none";
+
+                statusTempoReal.innerText =
+                    "Aguardando classificação estável...";
+            }
+
+        } catch (e) {
+            if (
+                !tempoRealAtivo ||
+                geracao !== geracaoCamera
+            ) {
+                return;
+            }
+
+            ultimaDeteccao = null;
+            historicoDeteccoes = [];
+
+            limparMarcacao();
+
+            statusTempoReal.innerText =
+                "Falha na análise: " + e.message;
+
+        } finally {
+            if (controladorDeteccao === controlador) {
+                controladorDeteccao = null;
+            }
+
+            if (
+                tempoRealAtivo &&
+                geracao === geracaoCamera
+            ) {
+                timerDeteccao = setTimeout(
+                    executarDeteccao,
+                    INTERVALO_MS
+                );
+            }
+        }
+    }
+
+    // =====================================================
+    // FECHAR CAMERA AO SAIR
+    // =====================================================
+
     window.addEventListener(
         "beforeunload",
         fecharCamera
     );
-
 </script>
 
 </body>

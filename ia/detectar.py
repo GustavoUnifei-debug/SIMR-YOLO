@@ -28,6 +28,7 @@ print("Modelo carregado com sucesso.")
 # FUNCAO DE DETECCAO
 # ---------------------------------------------------------
 
+
 def detectar_material(imagem):
 
     resultados = model.predict(
@@ -38,15 +39,21 @@ def detectar_material(imagem):
 
     resultado = resultados[0]
 
+    # Dimensoes originais da imagem
+    altura, largura = resultado.orig_shape
+
     if len(resultado.boxes) == 0:
 
         return {
             "detectado": False,
             "classe": None,
-            "confianca": 0.0
+            "confianca": 0.0,
+            "bbox": None,
+            "largura": largura,
+            "altura": altura
         }
 
-    # Pega a deteccao com maior confianca
+    # Mantem a deteccao de maior confianca
     melhor_box = max(
         resultado.boxes,
         key=lambda box: float(box.conf[0])
@@ -54,14 +61,30 @@ def detectar_material(imagem):
 
     classe_id = int(melhor_box.cls[0])
     confianca = float(melhor_box.conf[0])
-
     classe = model.names[classe_id]
+
+    # Coordenadas do retangulo:
+    # x1, y1 = canto superior esquerdo
+    # x2, y2 = canto inferior direito
+    x1, y1, x2, y2 = [
+        float(valor)
+        for valor in melhor_box.xyxy[0].tolist()
+    ]
 
     return {
         "detectado": True,
         "classe": classe,
-        "confianca": confianca
+        "confianca": confianca,
+        "bbox": [
+            round(x1, 2),
+            round(y1, 2),
+            round(x2, 2),
+            round(y2, 2)
+        ],
+        "largura": largura,
+        "altura": altura
     }
+
 
 
 # ---------------------------------------------------------

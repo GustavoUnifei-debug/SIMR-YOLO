@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse, FileResponse
 from pathlib import Path
@@ -36,7 +37,7 @@ app = FastAPI(
         "API do Sistema de Identificacao "
         "de Materiais Reciclaveis"
     ),
-    version="1.0"
+    version="1.1"
 )
 
 
@@ -47,9 +48,7 @@ app = FastAPI(
 @app.get("/")
 def inicio():
 
-    return FileResponse(
-        INTERFACE
-    )
+    return FileResponse(INTERFACE)
 
 
 # =========================================================
@@ -62,20 +61,19 @@ def status():
     return {
         "status": "OK",
         "sistema": "SIMR",
-        "modelo": "YOLOv8",
+        "modelo": "YOLOv8 V2",
         "classes": [
             "cardboard",
             "glass",
             "metal",
             "paper",
-            "plastic",
-            "trash"
+            "plastic"
         ]
     }
 
 
 # =========================================================
-# DETECCAO
+# DETECCAO DE MATERIAIS
 # =========================================================
 
 @app.post("/detectar")
@@ -149,16 +147,13 @@ async def detectar(
         ) as temp:
 
             temp.write(conteudo)
-
             caminho = temp.name
 
         # -------------------------------------------------
-        # Executar YOLOv8
+        # Executar YOLOv8 V2
         # -------------------------------------------------
 
-        resultado = detectar_material(
-            caminho
-        )
+        resultado = detectar_material(caminho)
 
         # -------------------------------------------------
         # Material detectado
@@ -172,7 +167,10 @@ async def detectar(
                 "confianca": round(
                     resultado["confianca"] * 100,
                     2
-                )
+                ),
+                "bbox": resultado["bbox"],
+                "largura": resultado["largura"],
+                "altura": resultado["altura"]
             }
 
         # -------------------------------------------------
@@ -182,7 +180,10 @@ async def detectar(
         return {
             "sucesso": False,
             "material": None,
-            "confianca": 0
+            "confianca": 0,
+            "bbox": None,
+            "largura": resultado["largura"],
+            "altura": resultado["altura"]
         }
 
     except Exception as erro:
